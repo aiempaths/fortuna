@@ -1,0 +1,213 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.fortuna/schemas/response.schema.json",
+  "title": "FortunaJobResponse",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "api_version",
+    "engine_id",
+    "job_id",
+    "status",
+    "mode",
+    "receipt_sha256",
+    "params_resolved",
+    "n_series",
+    "n_scored",
+    "summary",
+    "gate",
+    "metrics"
+  ],
+  "properties": {
+    "api_version": { "type": "string", "const": "0.1.0" },
+    "engine_id": { "type": "string", "const": "fortuna" },
+    "probe_profile": { "type": "string" },
+    "job_id": { "type": "string" },
+    "status": {
+      "type": "string",
+      "enum": ["ok", "error", "rejected"]
+    },
+    "error": {
+      "type": ["string", "null"],
+      "description": "Present when status is error or rejected."
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["diagnostics", "predict_vs_persistence"]
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC timestamp when the job finished."
+    },
+    "receipt_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "SHA-256 over canonical job inputs + resolved params + core metric block (engine-defined canonicalization)."
+    },
+    "params_resolved": {
+      "type": "object",
+      "description": "Full parameter set after defaults applied."
+    },
+    "n_series": { "type": "integer", "minimum": 0 },
+    "n_scored": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of post-warmup steps that produced a probe row."
+    },
+    "summary": {
+      "type": "object",
+      "required": ["plain"],
+      "properties": {
+        "plain": {
+          "type": "string",
+          "description": "Short human-written style summary string from the engine templates (not an LLM)."
+        },
+        "gate_status": { "type": "string" }
+      }
+    },
+    "gate": {
+      "type": "object",
+      "required": ["is_reliable", "status_message", "purity", "d_rel", "purity_pass", "d_rel_pass"],
+      "properties": {
+        "is_reliable": { "type": "boolean" },
+        "status_message": { "type": "string" },
+        "purity": { "type": ["number", "null"] },
+        "d_rel": { "type": ["number", "null"] },
+        "purity_pass": { "type": "boolean" },
+        "d_rel_pass": { "type": "boolean" },
+        "purity_threshold": { "type": "number" },
+        "d_rel_threshold": { "type": "number" }
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "required": ["d_rel_median", "purity_mean", "vote_frac_mean"],
+      "properties": {
+        "d_rel_median": { "type": ["number", "null"] },
+        "d_rel_mean": { "type": ["number", "null"] },
+        "d_rel_p90": { "type": ["number", "null"] },
+        "purity_mean": { "type": ["number", "null"] },
+        "purity_frac_unanimous": { "type": ["number", "null"] },
+        "vote_frac_mean": { "type": ["number", "null"] },
+        "positive_rate_actual": { "type": ["number", "null"] },
+        "positive_rate_pred": { "type": ["number", "null"] }
+      }
+    },
+    "predictive": {
+      "type": ["object", "null"],
+      "description": "Only for mode=predict_vs_persistence.",
+      "properties": {
+        "horizon": { "type": "integer" },
+        "geom_accuracy": { "type": ["number", "null"] },
+        "persistence_accuracy": { "type": ["number", "null"] },
+        "accuracy_delta": { "type": ["number", "null"] },
+        "geom_mcc": { "type": ["number", "null"] },
+        "persistence_mcc": { "type": ["number", "null"] },
+        "mcc_delta": { "type": ["number", "null"] },
+        "binding_metric": {
+          "type": "string",
+          "enum": ["accuracy", "mcc", "undefined"],
+          "description": "Which delta the engine treats as binding under class imbalance rules."
+        },
+        "edge_vs_persistence": {
+          "type": "string",
+          "enum": ["EDGE", "NULL", "UNDEFINED"],
+          "description": "Coarse label only. Not a sealed PREREG claim unless you run a sealed protocol separately."
+        }
+      }
+    },
+    "steps": {
+      "type": ["array", "null"],
+      "description": "Optional per-step rows when params.include_steps=true (may be truncated).",
+      "items": {
+        "type": "object",
+        "required": ["step", "actual_outcome", "geometry_prediction", "vote_frac"],
+        "properties": {
+          "step": { "type": "integer" },
+          "actual_outcome": { "type": "integer", "enum": [0, 1] },
+          "geometry_prediction": { "type": "integer", "enum": [0, 1] },
+          "vote_frac": { "type": "number" },
+          "purity": { "type": ["number", "null"] },
+          "d_rel": { "type": ["number", "null"] },
+          "knn_mean_dist": { "type": ["number", "null"] },
+          "pool_size": { "type": ["integer", "null"] }
+        }
+      }
+    }
+  }
+}
+
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.fortuna/schemas/request.schema.json",
+  "title": "FortunaJobRequest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["api_version", "mode", "series"],
+  "properties": {
+    "api_version": {
+      "type": "string",
+      "const": "0.1.0",
+      "description": "Fortuna contract version. Must match this schema release."
+    },
+    "job_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "Optional client-supplied id. If omitted, the engine assigns one."
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["diagnostics", "predict_vs_persistence"],
+      "description": "diagnostics = reliability metrics + gate; predict_vs_persistence = also score vs horizon-matched persistence."
+    },
+    "series": {
+      "type": "array",
+      "minItems": 120,
+      "maxItems": 200000,
+      "items": { "type": "number" },
+      "description": "Univariate numeric series, oldest → newest. Timestamps are not required for v0."
+    },
+    "params": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "window": { "type": "integer", "minimum": 8, "maximum": 512, "default": 40 },
+        "horizon": { "type": "integer", "minimum": 1, "maximum": 256, "default": 8 },
+        "warmup": { "type": "number", "minimum": 0.05, "maximum": 0.9, "default": 0.4 },
+        "k": { "type": "integer", "minimum": 1, "maximum": 50, "default": 5 },
+        "vote_threshold": { "type": "number", "minimum": 0.0, "maximum": 1.0, "default": 0.35 },
+        "theiler": { "type": "integer", "minimum": 0, "maximum": 10000, "default": 0 },
+        "label_k_sigma": {
+          "type": "number",
+          "minimum": 0.5,
+          "maximum": 10.0,
+          "default": 2.5,
+          "description": "Large-excursion label: forward abs max over horizon > label_k_sigma * window std (engine default 2.5)."
+        },
+        "purity_threshold": { "type": "number", "minimum": 0.5, "maximum": 1.0, "default": 0.75 },
+        "d_rel_threshold": { "type": "number", "minimum": 0.01, "maximum": 2.0, "default": 0.18 },
+        "include_steps": {
+          "type": "boolean",
+          "default": false,
+          "description": "If true, include a capped per-step table in the response."
+        },
+        "max_steps_returned": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5000,
+          "default": 500
+        }
+      }
+    },
+    "meta": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "series_name": { "type": "string", "maxLength": 128 },
+        "notes": { "type": "string", "maxLength": 2000 }
+      }
+    }
+  }
+}
