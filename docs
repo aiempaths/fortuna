@@ -1,0 +1,120 @@
+# Audience
+
+## Beachhead (who this repo is for)
+
+Fortuna is built for **research engineers and technical PMs on sensor or telemetry stacks** — especially space weather, industrial SCADA, and environmental / ops monitoring.
+
+These users can:
+
+- supply a **univariate** numeric series themselves
+- read d_rel, purity, and a **persistence** comparison without a SaaS dashboard
+- run or reach a **local / on-prem / air-gapped** host
+- care about **receipts** (hashable, inspectable outputs) more than chat UX
+- ask **"show me vs a dumb baseline"** before trusting a geometric probe
+
+They are comfortable with JSON, curl or a small script, and GitHub schemas. They do not need an AI product; if they use a model, it is their own client calling this contract.
+
+## Jobs-to-be-done
+
+1. Paste or stream a series and get a reliability view (diagnostics).
+2. Compare GeometryProbe guesses to horizon-matched persistence (predict_vs_persistence).
+3. Keep sensitive series on a machine they control.
+4. Share or archive a receipt that states params, metrics, and gate status.
+
+## Who is secondary
+
+Tooling and agent builders who only need the **request/response schemas** so their own automation can POST jobs. Same contract; no Fortuna-side AI.
+
+## Who this is not for (yet)
+
+- End users who want a consumer app or chat interface
+- Teams that require multi-tenant cloud, SSO, and SOC 2 on day one
+- AutoML / deep-learning platforms looking for another training stack
+- Multivariate forecasting suites or full digital-twin products
+
+## Positioning line (for README and outreach)
+
+> Fortuna is a local telemetry engine (API + receipts) for technical operators who want inspectable reliability and baseline comparisons on univariate series — not a hosted AI service.
+
+## Design implications (how this audience shapes the repo)
+
+| Audience need | Repo / product rule |
+|---------------|---------------------|
+| Air-gapped / on-prem | Spec only on GitHub; compute stays on the operator PC |
+| No SaaS required | Examples work with curl + JSON files |
+| Inspectable | Field meanings + receipt hash documented |
+| Baseline skepticism | predict_vs_persistence mode is first-class |
+| No AI lock-in | Explicit: Fortuna has no model integration |
+
+# Fortuna field meanings (v0.1.0)
+
+Plain-language guide for the request and response contracts. Fortuna does not use an AI model to generate these meanings.
+
+## Request
+
+| Field | Meaning |
+|-------|---------|
+| `api_version` | Must be `0.1.0` for this contract. |
+| `job_id` | Optional name you give the job so you can find the receipt later. |
+| `mode` | `diagnostics` = reliability view. `predict_vs_persistence` = also compare GeometryProbe guesses to repeating the label from `horizon` steps ago. |
+| `series` | Ordered numbers, oldest first. No timestamps in v0. Need enough points after warmup (practical minimum ~120; more is better). |
+| `params.window` | How many past points form one “shape” (default **40**). |
+| `params.horizon` | How far ahead the excursion label / forecast looks (default **8**). |
+| `params.warmup` | Fraction of the series used only to build history before scoring starts (default **0.4**). |
+| `params.k` | How many similar past windows to retrieve (default **5**). |
+| `params.vote_threshold` | In predictive scoring, predict event if the mean of neighbour labels ≥ this (default **0.35**). |
+| `params.theiler` | Drop neighbours that are too close in time (default **0** = off). |
+| `params.label_k_sigma` | A step is labeled positive if the max absolute move over the next `horizon` points exceeds this many window standard deviations (engine default **2.5**). |
+| `params.purity_threshold` | Gate: neighbours must agree at least this much (default **0.75**). |
+| `params.d_rel_threshold` | Gate: relative neighbour distance must be at most this (default **0.18**, provisional). |
+| `params.include_steps` | If true, attach a per-step table (may be truncated). |
+| `meta.series_name` | Optional label for your notes only. |
+
+## Response — identity
+
+| Field | Meaning |
+|-------|---------|
+| `engine_id` | Always `fortuna` for this product surface. |
+| `probe_profile` | Which frozen GeometryProbe defaults profile was used. |
+| `status` | `ok` finished; `error` failed; `rejected` input refused. |
+| `receipt_sha256` | Fingerprint of inputs + resolved params + core metrics so you can compare runs. |
+| `n_series` | Length of the series you sent. |
+| `n_scored` | How many steps after warmup actually got a probe row. |
+
+## Response — geometry metrics
+
+| Field | Meaning |
+|-------|---------|
+| `metrics.d_rel_median` | Typical **relative distance** of the k neighbours vs the rest of the eligible pool. Lower ≈ retrieved neighbours are distinctly closer than the pool. Formula used in Diagnostic Mode: `knn_mean_dist / pool_med_dist`. |
+| `metrics.purity_mean` | Typical **local label agreement**: `max(vote_frac, 1 - vote_frac)`. Near 1.0 means neighbours mostly share one label. |
+| `metrics.vote_frac_mean` | Average fraction of neighbours labeled positive. |
+| `gate.is_reliable` | `true` only if purity and d_rel both pass their thresholds. This is a **review flag**, not proof of forecasting skill. |
+| `gate.status_message` | `PASSED` or a short reject reason (`LOW_PURITY`, `HIGH_D_REL`, …). |
+
+## Response — predictive block (only if requested)
+
+| Field | Meaning |
+|-------|---------|
+| `predictive.geom_accuracy` | Share of scored steps where GeometryProbe matched the actual label. |
+| `predictive.persistence_accuracy` | Same for horizon-matched persistence (`actual[t - horizon]`). |
+| `predictive.accuracy_delta` | Geometry minus persistence (accuracy). |
+| `predictive.geom_mcc` / `persistence_mcc` | Matthews correlation when defined. |
+| `predictive.binding_metric` | Under heavy class imbalance the engine prefers MCC; otherwise accuracy. |
+| `predictive.edge_vs_persistence` | Coarse `EDGE` / `NULL` / `UNDEFINED` label for demos. A sealed research claim still requires your separate PREREG protocol — this API field is not that seal. |
+
+## Response — optional steps
+
+| Field | Meaning |
+|-------|---------|
+| `step` | Index in the series where the decision was made. |
+| `actual_outcome` | 0/1 excursion label at that step. |
+| `geometry_prediction` | 0/1 probe vote decision. |
+| `vote_frac` | Mean of neighbour labels. |
+| `purity` | Agreement of those labels. |
+| `d_rel` | Relative distance for that step (may be null if pool too small). |
+
+## Honest limits
+
+- Gate defaults came from ECG diagnostic work; solar/weather often need looser `d_rel` cutoffs.
+- Passing the gate ≠ beating persistence.
+- Fortuna v0 does not ship the 27-day solar recurrence baseline; that stays in the research vault unless you add it later.
